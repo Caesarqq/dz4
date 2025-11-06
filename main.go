@@ -11,32 +11,30 @@ import (
 )
 
 func main() {
-	run()
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
-func run() {
+func run() error {
 	opts, inputFile, outputFile, err := parseArgs(os.Args[1:])
 	if err != nil {
-		fmt.Println(err)
-		printUsage()
-		return
+		return fmt.Errorf("неверные аргументы")
 	}
 
 	lines, err := getLines(inputFile)
 	if err != nil {
-		fmt.Println("Ошибка при чтении входного файла:", err)
-		return
+		return err
 	}
 
 	result := uniq.ProcessLines(lines, opts)
 
 	if err := writeOutput(outputFile, result); err != nil {
-		fmt.Println("Ошибка при записи в выходной файл:", err)
+		return err
 	}
-}
 
-func printUsage() {
-	fmt.Println("Использование: uniq [-c | -d | -u] [-i] [-f число] [-s символы] [входной_файл [выходной_файл]]")
+	return nil
 }
 
 func getLines(inputFile string) ([]string, error) {
@@ -94,7 +92,7 @@ func parseArgs(args []string) (uniq.Options, string, string, error) {
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if isFlag(arg) {
+		if len(arg) > 0 && arg[0] == '-' {
 			var err error
 			i, err = handleFlag(arg, &opts, args, i)
 			if err != nil {
@@ -112,12 +110,7 @@ func parseArgs(args []string) (uniq.Options, string, string, error) {
 	if err := checkExclusiveFlags(opts); err != nil {
 		return opts, "", "", err
 	}
-
 	return opts, inputFile, outputFile, nil
-}
-
-func isFlag(arg string) bool {
-	return len(arg) > 0 && arg[0] == '-'
 }
 
 func handleFlag(arg string, opts *uniq.Options, args []string, i int) (int, error) {
@@ -136,7 +129,7 @@ func handleFlag(arg string, opts *uniq.Options, args []string, i int) (int, erro
 		}
 		val, err := strconv.Atoi(args[i+1])
 		if err != nil {
-			return i, fmt.Errorf("неверное значение для -f: %v", args[i+1])
+			return i, fmt.Errorf("неверное значение для -f")
 		}
 		opts.SkipFields = val
 		i++
@@ -146,7 +139,7 @@ func handleFlag(arg string, opts *uniq.Options, args []string, i int) (int, erro
 		}
 		val, err := strconv.Atoi(args[i+1])
 		if err != nil {
-			return i, fmt.Errorf("неверное значение для -s: %v", args[i+1])
+			return i, fmt.Errorf("неверное значение для -s")
 		}
 		opts.SkipChars = val
 		i++
@@ -166,7 +159,7 @@ func checkExclusiveFlags(opts uniq.Options) error {
 		count++
 	}
 	if count > 1 {
-		return fmt.Errorf("Ошибка: флаги -c, -d и -u нельзя использовать одновременно")
+		return fmt.Errorf("флаги -c, -d, -u")
 	}
 	return nil
 }
