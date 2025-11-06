@@ -11,6 +11,10 @@ import (
 )
 
 func main() {
+	run()
+}
+
+func run() {
 	opts, inputFile, outputFile, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fmt.Println(err)
@@ -65,68 +69,6 @@ func writeOutput(outputFile string, lines []string) error {
 	return writeLines(writer, lines)
 }
 
-func parseArgs(args []string) (uniq.Options, string, string, error) {
-	var opts uniq.Options
-	var inputFile, outputFile string
-	i := 0
-	for i < len(args) {
-		arg := args[i]
-		switch arg {
-		case "-c":
-			opts.Count = true
-		case "-d":
-			opts.Duplicate = true
-		case "-u":
-			opts.Unique = true
-		case "-i":
-			opts.IgnoreCase = true
-		case "-f":
-			if i+1 >= len(args) {
-				return opts, "", "", fmt.Errorf("отсутствует значение для -f")
-			}
-			val, err := strconv.Atoi(args[i+1])
-			if err != nil {
-				return opts, "", "", fmt.Errorf("неверное значение для -f: %v", args[i+1])
-			}
-			opts.SkipFields = val
-			i++
-		case "-s":
-			if i+1 >= len(args) {
-				return opts, "", "", fmt.Errorf("отсутствует значение для -s")
-			}
-			val, err := strconv.Atoi(args[i+1])
-			if err != nil {
-				return opts, "", "", fmt.Errorf("неверное значение для -s: %v", args[i+1])
-			}
-			opts.SkipChars = val
-			i++
-		default:
-			if inputFile == "" {
-				inputFile = arg
-			} else {
-				outputFile = arg
-			}
-		}
-		i++
-	}
-
-	flagCount := 0
-	if opts.Count {
-		flagCount++
-	}
-	if opts.Duplicate {
-		flagCount++
-	}
-	if opts.Unique {
-		flagCount++
-	}
-	if flagCount > 1 {
-		return opts, "", "", fmt.Errorf("Ошибка: флаги -c, -d и -u нельзя использовать одновременно")
-	}
-
-	return opts, inputFile, outputFile, nil
-}
-
 func readLines(r io.Reader) ([]string, error) {
 	var lines []string
 	scanner := bufio.NewScanner(r)
@@ -144,4 +86,87 @@ func writeLines(w io.Writer, lines []string) error {
 		}
 	}
 	return writer.Flush()
+}
+
+func parseArgs(args []string) (uniq.Options, string, string, error) {
+	opts := uniq.Options{}
+	inputFile, outputFile := "", ""
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if isFlag(arg) {
+			var err error
+			i, err = handleFlag(arg, &opts, args, i)
+			if err != nil {
+				return opts, "", "", err
+			}
+		} else {
+			if inputFile == "" {
+				inputFile = arg
+			} else {
+				outputFile = arg
+			}
+		}
+	}
+
+	if err := checkExclusiveFlags(opts); err != nil {
+		return opts, "", "", err
+	}
+
+	return opts, inputFile, outputFile, nil
+}
+
+func isFlag(arg string) bool {
+	return len(arg) > 0 && arg[0] == '-'
+}
+
+func handleFlag(arg string, opts *uniq.Options, args []string, i int) (int, error) {
+	switch arg {
+	case "-c":
+		opts.Count = true
+	case "-d":
+		opts.Duplicate = true
+	case "-u":
+		opts.Unique = true
+	case "-i":
+		opts.IgnoreCase = true
+	case "-f":
+		if i+1 >= len(args) {
+			return i, fmt.Errorf("отсутствует значение для -f")
+		}
+		val, err := strconv.Atoi(args[i+1])
+		if err != nil {
+			return i, fmt.Errorf("неверное значение для -f: %v", args[i+1])
+		}
+		opts.SkipFields = val
+		i++
+	case "-s":
+		if i+1 >= len(args) {
+			return i, fmt.Errorf("отсутствует значение для -s")
+		}
+		val, err := strconv.Atoi(args[i+1])
+		if err != nil {
+			return i, fmt.Errorf("неверное значение для -s: %v", args[i+1])
+		}
+		opts.SkipChars = val
+		i++
+	}
+	return i, nil
+}
+
+func checkExclusiveFlags(opts uniq.Options) error {
+	count := 0
+	if opts.Count {
+		count++
+	}
+	if opts.Duplicate {
+		count++
+	}
+	if opts.Unique {
+		count++
+	}
+	if count > 1 {
+		return fmt.Errorf("Ошибка: флаги -c, -d и -u нельзя использовать одновременно")
+	}
+	return nil
 }
