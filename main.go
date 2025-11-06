@@ -3,188 +3,133 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
-	"strings"
+
+	uniq "github.com/Caesarqq/dz4/uniqq"
 )
 
 func main() {
-	var countFlag bool
-	var duplicateFlag bool
-	var uniqueFlag bool
-	var ignoreCaseFlag bool
-	var skipFields int
-	var skipChars int
-	var inputFile string
-	var outputFile string
+	opts, inputFile, outputFile, err := parseArgs(os.Args[1:])
+	if err != nil {
+		fmt.Println(err)
+		fmt.Println("Usage: uniq [-c | -d | -u] [-i] [-f num] [-s chars] [input_file [output_file]]")
+		return
+	}
 
-	args := os.Args[1:]
+	var reader io.Reader
+	if inputFile != "" {
+		file, err := os.Open(inputFile)
+		if err != nil {
+			fmt.Println("Error opening input file:", err)
+			return
+		}
+		defer file.Close()
+		reader = file
+	} else {
+		reader = os.Stdin
+	}
+
+	lines, err := readLines(reader)
+	if err != nil {
+		fmt.Println("Error reading input:", err)
+		return
+	}
+
+	result := uniq.ProcessLines(lines, opts)
+	var writer io.Writer
+	if outputFile != "" {
+		file, err := os.Create(outputFile)
+		if err != nil {
+			fmt.Println("Error creating output file:", err)
+			return
+		}
+		defer file.Close()
+		writer = file
+	} else {
+		writer = os.Stdout
+	}
+
+	writeLines(writer, result)
+}
+
+func parseArgs(args []string) (uniq.Options, string, string, error) {
+	var opts uniq.Options
+	var inputFile, outputFile string
 	i := 0
+
 	for i < len(args) {
 		arg := args[i]
-
-		if arg == "-c" {
-			countFlag = true
-			i++
-		} else if arg == "-d" {
-			duplicateFlag = true
-			i++
-		} else if arg == "-u" {
-			uniqueFlag = true
-			i++
-		} else if arg == "-i" {
-			ignoreCaseFlag = true
-			i++
-		} else if arg == "-f" {
-			i++
-			if i < len(args) {
-				skipFields, _ = strconv.Atoi(args[i])
-				i++
+		switch arg {
+		case "-c":
+			opts.Count = true
+		case "-d":
+			opts.Duplicate = true
+		case "-u":
+			opts.Unique = true
+		case "-i":
+			opts.IgnoreCase = true
+		case "-f":
+			if i+1 >= len(args) {
+				return opts, "", "", fmt.Errorf("missing value for -f")
 			}
-		} else if arg == "-s" {
-			i++
-			if i < len(args) {
-				skipChars, _ = strconv.Atoi(args[i])
-				i++
+			val, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return opts, "", "", fmt.Errorf("invalid -f value: %v", args[i+1])
 			}
-		} else {
+			opts.SkipFields = val
+			i++
+		case "-s":
+			if i+1 >= len(args) {
+				return opts, "", "", fmt.Errorf("missing value for -s")
+			}
+			val, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return opts, "", "", fmt.Errorf("invalid -s value: %v", args[i+1])
+			}
+			opts.SkipChars = val
+			i++
+		default:
 			if inputFile == "" {
 				inputFile = arg
 			} else {
 				outputFile = arg
 			}
-			i++
 		}
+		i++
 	}
 
 	flagCount := 0
-	if countFlag {
+	if opts.Count {
 		flagCount++
 	}
-	if duplicateFlag {
+	if opts.Duplicate {
 		flagCount++
 	}
-	if uniqueFlag {
+	if opts.Unique {
 		flagCount++
 	}
-
 	if flagCount > 1 {
-		fmt.Println("Error: can't use -c, -d, -u together")
-		fmt.Println("Usage: uniq [-c | -d | -u] [-i] [-f num] [-s chars] [input_file [output_file]]")
-		return
+		return opts, "", "", fmt.Errorf("Error: can't use -c, -d, -u together")
 	}
 
+	return opts, inputFile, outputFile, nil
+}
+
+func readLines(r io.Reader) ([]string, error) {
 	var lines []string
-	if inputFile != "" {
-		file, err := os.Open(inputFile)
-		if err != nil {
-			fmt.Println("Error opening file:", err)
-			return
-		}
-		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-		}
-	} else {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-		}
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
 	}
-
-	result := processLines(lines, countFlag, duplicateFlag, uniqueFlag, ignoreCaseFlag, skipFields, skipChars)
-	if outputFile != "" {
-		file, err := os.Create(outputFile)
-		if err != nil {
-			fmt.Println("Error creating file:", err)
-			return
-		}
-		defer file.Close()
-
-		for _, line := range result {
-			fmt.Fprintln(file, line)
-		}
-	} else {
-		for _, line := range result {
-			fmt.Println(line)
-		}
-	}
+	return lines, scanner.Err()
 }
 
-func processLines(lines []string, countFlag, duplicateFlag, uniqueFlag,
-	ignoreCaseFlag bool, skipFields, skipChars int) []string {
-	if len(lines) == 0 {
-		return []string{}
+func writeLines(w io.Writer, lines []string) error {
+	writer := bufio.NewWriter(w)
+	for _, line := range lines {
+		fmt.Fprintln(writer, line)
 	}
-	var result []string
-	currentLine := lines[0]
-	currentKey := makeCompareKey(lines[0], ignoreCaseFlag, skipFields, skipChars)
-	count := 1
-	for i := 1; i < len(lines); i++ {
-		line := lines[i]
-		key := makeCompareKey(line, ignoreCaseFlag, skipFields, skipChars)
-		if key == currentKey {
-			count++
-		} else {
-			if shouldPrint(count, duplicateFlag, uniqueFlag) {
-				if countFlag {
-					result = append(result, fmt.Sprintf("%d %s", count, currentLine))
-				} else {
-					result = append(result, currentLine)
-				}
-			}
-			currentLine = line
-			currentKey = key
-			count = 1
-		}
-	}
-
-	if shouldPrint(count, duplicateFlag, uniqueFlag) {
-		if countFlag {
-			result = append(result, fmt.Sprintf("%d %s", count, currentLine))
-		} else {
-			result = append(result, currentLine)
-		}
-	}
-
-	return result
-}
-
-func makeCompareKey(line string, ignoreCase bool, skipFields, skipChars int) string {
-	key := line
-
-	if skipFields > 0 {
-		parts := strings.Fields(key)
-		if skipFields < len(parts) {
-			key = strings.Join(parts[skipFields:], " ")
-		} else {
-			key = ""
-		}
-	}
-
-	if skipChars > 0 {
-		if len(key) > skipChars {
-			key = key[skipChars:]
-		} else {
-			key = ""
-		}
-	}
-
-	if ignoreCase {
-		key = strings.ToLower(key)
-	}
-
-	return key
-}
-
-func shouldPrint(count int, duplicateFlag, uniqueFlag bool) bool {
-	if duplicateFlag {
-		return count > 1
-	}
-	if uniqueFlag {
-		return count == 1
-	}
-	return true
+	return writer.Flush()
 }
